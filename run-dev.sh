@@ -15,24 +15,25 @@ cleanup() {
 # Set trap for cleanup
 trap cleanup EXIT INT TERM
 
-# Check if backend virtual environment exists
-if [ ! -d "backend/venv" ]; then
-    echo "Backend virtual environment not found. Running setup..."
-    cd backend
-    python setup.py
-    cd ..
+# Activate backend virtual environment
+echo -e "\nActivating Python backend environment..."
+if [ -n "$VIRTUAL_ENV" ]; then
+    echo "Virtual environment already active."
+elif [ -f "backend/venv/bin/activate" ]; then
+    echo "Activating backend/venv..."
+    source "backend/venv/bin/activate"
+elif [ -f ".venv/bin/activate" ]; then
+    echo "Activating .venv..."
+    source ".venv/bin/activate"
+else
+    echo "ERROR: Could not find a virtual environment to activate."
+    echo "Please create one (e.g., 'python -m venv .venv') and install dependencies ('pip install -r backend/requirements.txt')."
+    exit 1
 fi
 
 # Start backend
 echo -e "\nStarting Python backend..."
 cd backend
-if [ -d "venv/bin" ]; then
-    # Unix-like systems
-    source venv/bin/activate
-else
-    # Windows Git Bash
-    source venv/Scripts/activate 2>/dev/null || true
-fi
 
 python app.py &
 BACKEND_PID=$!
