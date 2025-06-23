@@ -7,21 +7,23 @@ echo "=================================="
 # Check if node_modules exists
 if [ ! -d "node_modules" ]; then
     echo "Installing dependencies..."
-    npm install
+    npm install --legacy-peer-deps
 fi
 
-# Check if Python virtual environment exists
-if [ ! -d "backend/venv" ]; then
-    echo "Creating Python virtual environment..."
+# Check if backend virtual environment is set up correctly
+if [ ! -f "backend/venv/bin/activate" ]; then
+    echo "Backend virtual environment not found or is corrupted. Recreating..."
+    rm -rf backend/venv
     cd backend
     python3 -m venv venv
     source venv/bin/activate
+    echo "Installing backend dependencies..."
     pip install -r requirements.txt
     cd ..
-else
-    echo "Activating Python virtual environment..."
-    source backend/venv/bin/activate
 fi
+
+# Activate Python virtual environment
+source backend/venv/bin/activate
 
 # Check if models directory exists
 if [ ! -d "models" ]; then
@@ -30,17 +32,5 @@ if [ ! -d "models" ]; then
 fi
 
 # Start the application
-echo "Starting backend server..."
-cd backend && python app.py &
-BACKEND_PID=$!
-
-echo "Waiting for backend to start..."
-sleep 3
-
-echo "Starting frontend and Electron..."
-cd .. && npm run dev
-
-# Kill backend when frontend exits
-kill $BACKEND_PID
-
-echo "Application stopped."
+echo "Starting application..."
+npm run dev

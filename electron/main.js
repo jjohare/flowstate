@@ -1,11 +1,9 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const isDev = require('electron-is-dev');
-const { spawn } = require('child_process');
 const fs = require('fs');
 
 let mainWindow;
-let pythonProcess;
 
 // Configure menu
 const isMac = process.platform === 'darwin';
@@ -84,24 +82,6 @@ const template = [
   }
 ];
 
-// Path helpers for Python backend
-const getPythonPath = () => {
-  if (isDev) {
-    return 'python';
-  }
-  // In production, use bundled Python
-  const platform = process.platform;
-  const pythonExe = platform === 'win32' ? 'python.exe' : 'python';
-  return path.join(process.resourcesPath, 'backend', 'python', pythonExe);
-};
-
-const getBackendPath = () => {
-  if (isDev) {
-    return path.join(__dirname, '..', 'backend', 'app.py');
-  }
-  return path.join(process.resourcesPath, 'backend', 'src', 'app.py');
-};
-
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -139,56 +119,6 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
-}
-
-// Start Python backend
-async function startPythonBackend() {
-  const pythonPath = getPythonPath();
-  const backendPath = getBackendPath();
-
-  console.log('Starting Python backend:', pythonPath, backendPath);
-
-  try {
-    pythonProcess = spawn(pythonPath, [backendPath], {
-      env: {
-        ...process.env,
-        PYTHONUNBUFFERED: '1',
-        CUDA_VISIBLE_DEVICES: '0',
-        TF_CPP_MIN_LOG_LEVEL: '2'
-      }
-    });
-
-    pythonProcess.stdout.on('data', (data) => {
-      console.log(`Python stdout: ${data}`);
-      // Send backend status to renderer
-      if (mainWindow) {
-        mainWindow.webContents.send('backend-status', { status: 'running', message: data.toString() });
-      }
-    });
-
-    pythonProcess.stderr.on('data', (data) => {
-      console.error(`Python stderr: ${data}`);
-      if (mainWindow) {
-        mainWindow.webContents.send('backend-status', { status: 'error', message: data.toString() });
-      }
-    });
-
-    pythonProcess.on('error', (error) => {
-      console.error('Failed to start Python backend:', error);
-      dialog.showErrorBox('Backend Error', 'Failed to start Python backend. Please check your installation.');
-    });
-
-    pythonProcess.on('close', (code) => {
-      console.log(`Python process exited with code ${code}`);
-      pythonProcess = null;
-      if (mainWindow) {
-        mainWindow.webContents.send('backend-status', { status: 'stopped', code });
-      }
-    });
-  } catch (error) {
-    console.error('Error starting Python backend:', error);
-    dialog.showErrorBox('Backend Error', `Failed to start backend: ${error.message}`);
-  }
 }
 
 // IPC handlers
@@ -389,45 +319,9 @@ ipcMain.handle('compare-movements', async (event, userPoses, referenceForm) => {
 // App event handlers
 app.whenReady().then(async () => {
   createWindow();
-
-  // Start backend
-  await startPythonBackend();
-
-  // Wait for backend to be ready
-  let attempts = 0;
-  const maxAttempts = 30; // 30 seconds timeout
-  const checkBackend = async () => {
-    try {
-      const response = await axios.get(`${BACKEND_URL}/health`, { timeout: 1000 });
-      return response.status === 200;
-    } catch (error) {
-      return false;
-    }
-  };
-
-  const waitForBackend = async () => {
-    while (attempts < maxAttempts) {
-      if (await checkBackend()) {
-        console.log('Backend is ready');
-        mainWindow.webContents.send('backend-ready');
-        return;
-      }
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      attempts++;
-    }
-    console.error('Backend failed to start');
-    dialog.showErrorBox('Backend Error', 'Failed to start Python backend. Please check the logs.');
-  };
-
-  waitForBackend();
 });
 
 app.on('window-all-closed', () => {
-  // Kill Python process
-  if (pythonProcess) {
-    pythonProcess.kill();
-  }
-
   if (process.platform !== 'darwin') {
     app.quit();
   }
@@ -437,18 +331,4 @@ app.on('activate', () => {
   if (mainWindow === null) {
     createWindow();
   }
-});
-
-// Cleanup on exit
-app.on('before-quit', () => {
-  if (pythonProcess) {
-    pythonProcess.kill('SIGTERM');
-  }
-});
-
-process.on('SIGINT', () => {
-  if (pythonProcess) {
-    pythonProcess.kill('SIGTERM');
-  }
-  app.quit();
 });

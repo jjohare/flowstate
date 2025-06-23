@@ -1,24 +1,3 @@
-// Electron API types
-declare global {
-  interface Window {
-    electronAPI?: {
-      selectVideo: () => Promise<string | null>;
-      saveSession: (data: any) => Promise<string | null>;
-      loadSession: () => Promise<any | null>;
-      exportVideo: (options: any) => Promise<string | null>;
-      backendRequest: (endpoint: string, data: any) => Promise<any>;
-      onBackendStatus: (callback: (status: any) => void) => void;
-      onMenuAction: (action: string, callback: () => void) => void;
-      platform: string;
-      versions: {
-        node: string;
-        chrome: string;
-        electron: string;
-      };
-    };
-  }
-}
-
 // Motion capture types
 export interface Keypoint {
   x: number;
