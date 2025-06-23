@@ -20,19 +20,15 @@ import {
 } from '@mui/icons-material';
 import { motion } from 'framer-motion';
 import { useAppStore } from '../store/appStore';
-import axios from 'axios';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 export default function VideoCapture() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoId, setVideoId] = useState<string | null>(null);
   const [processingResults, setProcessingResults] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
-  
+
   const {
     videoPath,
     setVideoPath,
@@ -44,28 +40,36 @@ export default function VideoCapture() {
 
   // Poll for processing status
   useEffect(() => {
-    if (videoId && isProcessing) {
+    if (videoId && isProcessing && window.electronAPI) {
       const interval = setInterval(async () => {
         try {
-          const response = await axios.get(`${API_URL}/video/status/${videoId}`);
-          const { status, progress } = response.data;
-          
-          setProcessingProgress(progress);
-          
-          if (status === 'completed') {
-            clearInterval(interval);
-            setIsProcessing(false);
-            
-            // Fetch results
-            const resultsResponse = await axios.get(`${API_URL}/video/results/${videoId}`);
-            setProcessingResults(resultsResponse.data.results);
-          } else if (status === 'error') {
-            clearInterval(interval);
-            setIsProcessing(false);
-            setError('Processing failed. Please try again.');
+          const response = await window.electronAPI.getVideoStatus(videoId);
+          if (response.success) {
+            const { status, progress } = response.data;
+            setProcessingProgress(progress);
+
+            if (status === 'completed') {
+              clearInterval(interval);
+              setIsProcessing(false);
+
+              // Fetch results
+              const resultsResponse = await window.electronAPI.getVideoResults(videoId);
+              if (resultsResponse.success) {
+                setProcessingResults(resultsResponse.data.results);
+              } else {
+                setError(resultsResponse.error || 'Failed to fetch results.');
+              }
+            } else if (status === 'error') {
+              clearInterval(interval);
+              setIsProcessing(false);
+              setError('Processing failed. Please try again.');
+            }
           }
         } catch (err) {
           console.error('Failed to check status:', err);
+          setError('Failed to communicate with backend.');
+          setIsProcessing(false);
+          clearInterval(interval);
         }
       }, 1000);
 
@@ -78,8 +82,12 @@ export default function VideoCapture() {
       const path = await window.electronAPI.selectVideo();
       if (path) {
         setVideoPath(path);
+        setVideoId(null);
+        setProcessingResults(null);
+        setError(null);
       }
     } else if (fileInputRef.current) {
+      // Fallback for web environment
       fileInputRef.current.click();
     }
   };
@@ -88,48 +96,46 @@ export default function VideoCapture() {
     const file = event.target.files?.[0];
     if (file) {
       const url = URL.createObjectURL(file);
-      setVideoPath(url);
-      setVideoFile(file);
-      setError(null);
+      setVideoPath(url); // This will not work with IPC, but keeps web fallback functional
+      setError('File selection in web mode is for preview only. Please use the Electron app to process videos.');
       setProcessingResults(null);
     }
   };
 
   const handleProcess = async () => {
-    if (!videoFile && !videoPath) {
+    if (!videoPath) {
       setError('Please select a video file first');
+      return;
+    }
+
+    if (!window.electronAPI) {
+      setError('Backend communication is only available in the Electron app.');
       return;
     }
 
     setIsProcessing(true);
     setProcessingProgress(0);
     setError(null);
-    
+
     try {
-      // Upload video if using file
-      let uploadVideoId = videoId;
-      
-      if (videoFile && !uploadVideoId) {
-        const formData = new FormData();
-        formData.append('video', videoFile);
-        
-        const uploadResponse = await axios.post(`${API_URL}/video/upload`, formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        });
-        
-        uploadVideoId = uploadResponse.data.video_id;
-        setVideoId(uploadVideoId);
-      }
-      
-      // Start processing
-      if (uploadVideoId) {
-        await axios.post(`${API_URL}/video/process/${uploadVideoId}`);
+      // Upload video
+      const uploadResponse = await window.electronAPI.uploadVideo(videoPath);
+
+      if (uploadResponse.success) {
+        const newVideoId = uploadResponse.data.video_id;
+        setVideoId(newVideoId);
+
+        // Start processing
+        const processResponse = await window.electronAPI.processVideo(newVideoId);
+        if (!processResponse.success) {
+          throw new Error(processResponse.error || 'Failed to start processing');
+        }
+      } else {
+        throw new Error(uploadResponse.error || 'Failed to upload video');
       }
     } catch (err: any) {
       console.error('Processing error:', err);
-      setError(err.response?.data?.error || 'Failed to process video');
+      setError(err.message || 'Failed to process video');
       setIsProcessing(false);
     }
   };

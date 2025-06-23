@@ -6,6 +6,8 @@ import sys
 import json
 import logging
 import tempfile
+import time
+import atexit
 from pathlib import Path
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -95,16 +97,16 @@ def upload_video():
     """Upload video for processing."""
     if 'video' not in request.files:
         return jsonify({'error': 'No video file provided'}), 400
-    
+
     file = request.files['video']
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
-    
+
     if file and allowed_file(file.filename):
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
-        
+
         # Initialize processing status
         video_id = os.path.splitext(filename)[0]
         processing_status[video_id] = {
@@ -113,13 +115,13 @@ def upload_video():
             'progress': 0,
             'results': None
         }
-        
+
         return jsonify({
             'status': 'success',
             'video_id': video_id,
             'filename': filename
         })
-    
+
     return jsonify({'error': 'Invalid file type'}), 400
 
 
@@ -128,27 +130,27 @@ def process_video(video_id):
     """Process uploaded video for pose detection and analysis."""
     if video_id not in processing_status:
         return jsonify({'error': 'Video not found'}), 404
-    
+
     try:
         filepath = processing_status[video_id]['filepath']
         processing_status[video_id]['status'] = 'processing'
-        
+
         # Process video with pose detection
         results = video_processor.process_video(
             filepath,
             progress_callback=lambda p: update_progress(video_id, p)
         )
-        
+
         # Analyze poses for Tai Chi form quality
         analysis = pose_analyzer.analyze_sequence(results['poses'])
-        
+
         processing_status[video_id]['status'] = 'completed'
         processing_status[video_id]['results'] = {
             'poses': results['poses'],
             'analysis': analysis,
             'metrics': results['metrics']
         }
-        
+
         return jsonify({
             'status': 'success',
             'video_id': video_id,
@@ -158,7 +160,7 @@ def process_video(video_id):
                 'average_confidence': results['metrics']['average_confidence']
             }
         })
-        
+
     except Exception as e:
         logger.error(f"Error processing video {video_id}: {e}")
         processing_status[video_id]['status'] = 'error'
@@ -171,7 +173,7 @@ def get_video_status(video_id):
     """Get processing status for a video."""
     if video_id not in processing_status:
         return jsonify({'error': 'Video not found'}), 404
-    
+
     status = processing_status[video_id]
     return jsonify({
         'video_id': video_id,
@@ -186,11 +188,11 @@ def get_video_results(video_id):
     """Get analysis results for processed video."""
     if video_id not in processing_status:
         return jsonify({'error': 'Video not found'}), 404
-    
+
     status = processing_status[video_id]
     if status['status'] != 'completed':
         return jsonify({'error': 'Video processing not completed'}), 400
-    
+
     return jsonify({
         'video_id': video_id,
         'results': status['results']
@@ -203,31 +205,31 @@ def process_stream():
     try:
         data = request.json
         frame_data = data.get('frame')
-        
+
         if not frame_data:
             return jsonify({'error': 'No frame data provided'}), 400
-        
+
         # Decode base64 frame
         import base64
         frame_bytes = base64.b64decode(frame_data.split(',')[1])
         nparr = np.frombuffer(frame_bytes, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
+
         # Process single frame
         pose_result = video_processor.process_frame(frame)
-        
+
         # Quick analysis for real-time feedback
         if pose_result['landmarks']:
             feedback = pose_analyzer.get_realtime_feedback(pose_result['landmarks'])
         else:
             feedback = None
-        
+
         return jsonify({
             'status': 'success',
             'pose': pose_result,
             'feedback': feedback
         })
-        
+
     except Exception as e:
         logger.error(f"Error processing stream frame: {e}")
         return jsonify({'error': str(e)}), 500
@@ -269,20 +271,20 @@ def compare_movements():
         data = request.json
         user_poses = data.get('user_poses')
         reference_form = data.get('reference_form')
-        
+
         if not user_poses or not reference_form:
             return jsonify({'error': 'Missing required data'}), 400
-        
+
         comparison = pose_analyzer.compare_with_reference(
             user_poses,
             reference_form
         )
-        
+
         return jsonify({
             'status': 'success',
             'comparison': comparison
         })
-        
+
     except Exception as e:
         logger.error(f"Error comparing movements: {e}")
         return jsonify({'error': str(e)}), 500
@@ -298,23 +300,29 @@ def cleanup_old_files():
     """Clean up old temporary files."""
     try:
         temp_dir = Path(app.config['UPLOAD_FOLDER'])
+        logger.info(f"Cleaning up temporary files in {temp_dir}")
         for file_path in temp_dir.glob('*'):
             if file_path.is_file() and file_path.stat().st_mtime < time.time() - 3600:
+                logger.info(f"Removing old file: {file_path}")
                 file_path.unlink()
     except Exception as e:
         logger.error(f"Error cleaning up files: {e}")
 
 
 if __name__ == '__main__':
+    # Register cleanup functions
+    atexit.register(cleanup_old_files)
+    atexit.register(lambda: video_processor.cleanup())
+
     # Initialize models on startup
     logger.info("Starting Tai Chi backend server...")
-    
+
     try:
         model_manager.load_all_models()
         logger.info("Models loaded successfully")
     except Exception as e:
         logger.warning(f"Failed to load models on startup: {e}")
-    
+
     # Run Flask app
     app.run(
         host='127.0.0.1',

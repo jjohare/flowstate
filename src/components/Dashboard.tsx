@@ -290,8 +290,9 @@ export default function Dashboard() {
                 fullWidth
                 sx={{ mt: 3 }}
                 onClick={() => navigate('/training')}
+                disabled
               >
-                Start Training
+                Start Training (Coming Soon)
               </Button>
             </CardContent>
           </Card>

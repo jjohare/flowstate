@@ -141,32 +141,13 @@ function createWindow() {
   });
 }
 
-// Check if backend is already running
-async function checkBackendRunning() {
-  try {
-    const response = await axios.get(`${BACKEND_URL}/health`, { timeout: 1000 });
-    return response.status === 200;
-  } catch (error) {
-    return false;
-  }
-}
-
 // Start Python backend
 async function startPythonBackend() {
-  // Check if backend is already running (dev mode)
-  const isRunning = await checkBackendRunning();
-  if (isRunning) {
-    console.log('Backend already running');
-    if (mainWindow) {
-      mainWindow.webContents.send('backend-status', { status: 'running', message: 'Backend already running' });
-    }
-    return;
-  }
   const pythonPath = getPythonPath();
   const backendPath = getBackendPath();
-  
+
   console.log('Starting Python backend:', pythonPath, backendPath);
-  
+
   try {
     pythonProcess = spawn(pythonPath, [backendPath], {
       env: {
@@ -218,7 +199,7 @@ ipcMain.handle('select-video', async () => {
       { name: 'Videos', extensions: ['mp4', 'avi', 'mov', 'mkv', 'webm'] }
     ]
   });
-  
+
   if (!result.canceled) {
     return result.filePaths[0];
   }
@@ -232,7 +213,7 @@ ipcMain.handle('save-session', async (event, data) => {
       { name: 'JSON', extensions: ['json'] }
     ]
   });
-  
+
   if (!result.canceled) {
     fs.writeFileSync(result.filePath, JSON.stringify(data, null, 2));
     return result.filePath;
@@ -247,7 +228,7 @@ ipcMain.handle('load-session', async () => {
       { name: 'JSON', extensions: ['json'] }
     ]
   });
-  
+
   if (!result.canceled) {
     const data = fs.readFileSync(result.filePaths[0], 'utf8');
     return JSON.parse(data);
@@ -262,15 +243,13 @@ ipcMain.handle('export-video', async (event, options) => {
       { name: 'MP4 Video', extensions: ['mp4'] }
     ]
   });
-  
+
   if (!result.canceled) {
     return result.filePath;
   }
   return null;
 });
 
-// Backend communication
-const axios = require('axios');
 const BACKEND_URL = 'http://127.0.0.1:5000';
 
 ipcMain.handle('backend-request', async (event, endpoint, method = 'GET', data = null) => {
@@ -282,11 +261,11 @@ ipcMain.handle('backend-request', async (event, endpoint, method = 'GET', data =
         'Content-Type': 'application/json'
       }
     };
-    
+
     if (data) {
       config.data = data;
     }
-    
+
     const response = await axios(config);
     return { success: true, data: response.data };
   } catch (error) {
@@ -313,13 +292,13 @@ ipcMain.handle('upload-video', async (event, videoPath) => {
     const FormData = require('form-data');
     const form = new FormData();
     form.append('video', fs.createReadStream(videoPath));
-    
+
     const response = await axios.post(`${BACKEND_URL}/video/upload`, form, {
       headers: form.getHeaders(),
       maxContentLength: Infinity,
       maxBodyLength: Infinity
     });
-    
+
     return { success: true, data: response.data };
   } catch (error) {
     console.error('Video upload error:', error);
@@ -410,32 +389,37 @@ ipcMain.handle('compare-movements', async (event, userPoses, referenceForm) => {
 // App event handlers
 app.whenReady().then(async () => {
   createWindow();
-  
-  // Start backend (in dev mode, check if already running)
+
+  // Start backend
   await startPythonBackend();
-  
+
   // Wait for backend to be ready
-  let backendReady = false;
   let attempts = 0;
   const maxAttempts = 30; // 30 seconds timeout
-  
-  while (!backendReady && attempts < maxAttempts) {
-    backendReady = await checkBackendRunning();
-    if (!backendReady) {
+  const checkBackend = async () => {
+    try {
+      const response = await axios.get(`${BACKEND_URL}/health`, { timeout: 1000 });
+      return response.status === 200;
+    } catch (error) {
+      return false;
+    }
+  };
+
+  const waitForBackend = async () => {
+    while (attempts < maxAttempts) {
+      if (await checkBackend()) {
+        console.log('Backend is ready');
+        mainWindow.webContents.send('backend-ready');
+        return;
+      }
       await new Promise(resolve => setTimeout(resolve, 1000));
       attempts++;
     }
-  }
-  
-  if (backendReady) {
-    console.log('Backend is ready');
-    if (mainWindow) {
-      mainWindow.webContents.send('backend-ready');
-    }
-  } else {
     console.error('Backend failed to start');
     dialog.showErrorBox('Backend Error', 'Failed to start Python backend. Please check the logs.');
-  }
+  };
+
+  waitForBackend();
 });
 
 app.on('window-all-closed', () => {
@@ -443,7 +427,7 @@ app.on('window-all-closed', () => {
   if (pythonProcess) {
     pythonProcess.kill();
   }
-  
+
   if (process.platform !== 'darwin') {
     app.quit();
   }
