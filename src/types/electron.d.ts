@@ -2,10 +2,10 @@ export {};
 
 declare global {
   interface Window {
-    electronAPI: {
+    electronAPI?: {
       selectVideo: () => Promise<string | null>;
       saveSession: (data: any) => Promise<string | null>;
-      loadSession: () => Promise<any>;
+      loadSession: () => Promise<any | null>;
       exportVideo: (options: any) => Promise<string | null>;
       backendRequest: (endpoint: string, method: string, data?: any) => Promise<any>;
       backendHealth: () => Promise<any>;

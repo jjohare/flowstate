@@ -42,6 +42,10 @@ export default function VideoCapture() {
   useEffect(() => {
     if (videoId && isProcessing && window.electronAPI) {
       const interval = setInterval(async () => {
+        if (!window.electronAPI) {
+          clearInterval(interval);
+          return;
+        }
         try {
           const response = await window.electronAPI.getVideoStatus(videoId);
           if (response.success) {
@@ -53,11 +57,13 @@ export default function VideoCapture() {
               setIsProcessing(false);
 
               // Fetch results
-              const resultsResponse = await window.electronAPI.getVideoResults(videoId);
-              if (resultsResponse.success) {
-                setProcessingResults(resultsResponse.data.results);
-              } else {
-                setError(resultsResponse.error || 'Failed to fetch results.');
+              if (window.electronAPI) {
+                const resultsResponse = await window.electronAPI.getVideoResults(videoId);
+                if (resultsResponse.success) {
+                  setProcessingResults(resultsResponse.data.results);
+                } else {
+                  setError(resultsResponse.error || 'Failed to fetch results.');
+                }
               }
             } else if (status === 'error') {
               clearInterval(interval);

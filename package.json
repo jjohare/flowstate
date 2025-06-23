@@ -6,7 +6,7 @@
   "scripts": {
     "start": "npm run dev",
     "dev": "concurrently -k -p \"[{name}]\" -n \"BACKEND,REACT,ELECTRON\" -c \"bgBlue.bold,bgGreen.bold,bgMagenta.bold\" \"npm run dev:backend\" \"npm run dev:react\" \"npm run dev:electron\"",
-    "dev:backend": "cd backend && python app.py",
+    "dev:backend": "backend/venv/bin/python backend/app.py",
     "dev:react": "cross-env BROWSER=none REACT_APP_API_URL=http://localhost:5000 react-scripts start",
     "dev:electron": "wait-on http://localhost:3000 && cross-env NODE_ENV=development electron .",
     "start:react": "cross-env BROWSER=none react-scripts start",
